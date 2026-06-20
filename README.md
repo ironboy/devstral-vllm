@@ -19,31 +19,32 @@ docker build -t devstral-vllm:0.22.1 .
 ```
 
 ## Run
+Sensible serving args are baked in as the default command, so this just works:
 ```bash
 docker run --gpus all -p 8000:8000 \
   -e VLLM_API_KEY=<your-api-key> \
+  devstral-vllm:0.22.1
+```
+Override any setting by passing your own args after the image name (they replace the
+defaults), e.g. to drop speculative decoding:
+```bash
+docker run --gpus all -p 8000:8000 -e VLLM_API_KEY=<your-api-key> \
   devstral-vllm:0.22.1 \
-  --host 0.0.0.0 --port 8000 \
-  --model mistralai/Devstral-Small-2-24B-Instruct-2512 \
-  --revision f2ca762c466d28ab948b7205492ceb3914e73f8a \
-  --max-model-len 131072 \
-  --kv-cache-dtype fp8 \
-  --enable-prefix-caching \
-  --gpu-memory-utilization 0.90 \
-  --max-num-batched-tokens 8192 \
-  --enable-auto-tool-choice --tool-call-parser mistral \
-  --spec-method ngram --spec-tokens 8
+  --host 0.0.0.0 --port 8000 --model mistralai/Devstral-Small-2-24B-Instruct-2512 \
+  --revision f2ca762c466d28ab948b7205492ceb3914e73f8a --max-model-len 131072
 ```
 
-Notes:
+Baked-in defaults:
 - `--revision` pins an immutable model commit so a fresh download always gets the
   same weights/tokenizer.
 - `--spec-method ngram --spec-tokens 8` enables n-gram speculative decoding (faster
-  single-stream decode). Drop it to compare.
-- `VLLM_API_KEY` (env) is the bearer token the server requires; clients must match it.
-- Exposes an OpenAI-compatible API at `/v1/chat/completions`; health at `/health`
-  (returns 200 once the model is loaded — allow a generous startup/grace window for
-  the first weight download).
+  single-stream decode).
+- `--kv-cache-dtype fp8`, `--enable-prefix-caching`, `--max-model-len 131072`, etc.
+
+`VLLM_API_KEY` (env) is the bearer token the server requires; clients must match it.
+Exposes an OpenAI-compatible API at `/v1/chat/completions`; health at `/health`
+(returns 200 once the model is loaded — allow a generous startup/grace window for the
+first weight download).
 
 ## Notes on serving platforms
 - The model loads the API server only **after** weights are loaded, so set the

@@ -23,3 +23,18 @@ RUN pip install -q --no-cache-dir transformers==5.12.1 mistral_common==1.11.3
 RUN F=/usr/local/lib/python3.12/dist-packages/transformers/processing_utils.py && \
     sed -i 's/self\.image_processor\.fetch_images(images)/getattr(self.image_processor, "fetch_images", lambda x: x)(images)/' "$F" && \
     grep -q 'getattr(self.image_processor, "fetch_images", lambda x: x)(images)' "$F"
+
+# Default serving args. The base ENTRYPOINT is ["vllm","serve"], so these append to
+# it -> `vllm serve <args>`. Run the image with no args and it just serves; override
+# by passing your own args after the image name. VLLM_API_KEY comes from the env.
+CMD ["--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--model", "mistralai/Devstral-Small-2-24B-Instruct-2512", \
+     "--revision", "f2ca762c466d28ab948b7205492ceb3914e73f8a", \
+     "--max-model-len", "131072", \
+     "--kv-cache-dtype", "fp8", \
+     "--enable-prefix-caching", \
+     "--gpu-memory-utilization", "0.90", \
+     "--max-num-batched-tokens", "8192", \
+     "--enable-auto-tool-choice", "--tool-call-parser", "mistral", \
+     "--spec-method", "ngram", "--spec-tokens", "8"]
