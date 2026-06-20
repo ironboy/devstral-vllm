@@ -24,6 +24,12 @@ RUN F=/usr/local/lib/python3.12/dist-packages/transformers/processing_utils.py &
     sed -i 's/self\.image_processor\.fetch_images(images)/getattr(self.image_processor, "fetch_images", lambda x: x)(images)/' "$F" && \
     grep -q 'getattr(self.image_processor, "fetch_images", lambda x: x)(images)' "$F"
 
+# CUDA forward compatibility. This image ships CUDA 12.9 userspace, but some GPU
+# hosts run an older kernel-mode driver (e.g. 12.4 -> "driver too old"). On data-
+# center GPUs (H100/H200/A100/B200) the bundled forward-compat driver lets the newer
+# CUDA run on the older kernel driver — just put it first on the library path.
+ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:${LD_LIBRARY_PATH}
+
 # Default serving args. The base ENTRYPOINT is ["vllm","serve"], so these append to
 # it -> `vllm serve <args>`. Run the image with no args and it just serves; override
 # by passing your own args after the image name. VLLM_API_KEY comes from the env.
