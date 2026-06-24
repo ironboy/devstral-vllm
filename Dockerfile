@@ -40,6 +40,7 @@ CMD ["--host", "0.0.0.0", \
      "--max-model-len", "131072", \
      "--kv-cache-dtype", "fp8", \
      "--enable-prefix-caching", \
+     "--enable-prompt-tokens-details", \
      "--gpu-memory-utilization", "0.90", \
      "--max-num-batched-tokens", "8192", \
      "--enable-auto-tool-choice", "--tool-call-parser", "mistral", \
