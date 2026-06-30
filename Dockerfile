@@ -1,47 +1,48 @@
 # Devstral Small 2 (24B) on vLLM — vision-capable inference image.
+# ░░ BLACKWELL (RTX PRO 6000 / SM 120) variant — branch `blackwell` ░░
 #
-# A self-contained image you can run on any Docker-based GPU host (Koyeb, Berget,
-# bare metal, k8s). Based on the official vLLM image; adds one source guard so the
-# Pixtral (vision) multimodal init doesn't crash on this transformers build.
+# Differs from `main` (which targets Ada/H100/H200 on vLLM 0.22.1). Three things change
+# for an SM 120 card, all verified against upstream:
 #
-# The stock vllm/vllm-openai:v0.22.1 image crashes at engine-init building a dummy
-# image:
-#   AttributeError: 'MistralCommonImageProcessor' object has no attribute 'fetch_images'
-# (transformers/processing_utils.py: prepare_inputs_layout unconditionally calls
-# fetch_images, which the mistral-common image processor doesn't implement).
-# fetch_images only downloads URL images; already-loaded PIL images pass through
-# unchanged — so we guard the call: use it if present, else pass images through.
+#  1) BASE = vLLM 0.24.0. 0.22.1 prints "SM 12.x requires CUDA >= 12.9" (its cu128 wheel
+#     is too old for Blackwell). 0.24.0 is the first release that lists SM120 support AND
+#     contains the fetch_images fix (PR #45180) — so NO sed-guard is needed here, unlike
+#     main. (Image is cu129; that already satisfies the >=12.9 gate. For a true CUDA-13
+#     userspace use the cu130 nightly — see README.)
+#  2) Tokenizer: we serve in mistral mode (entrypoint), using vLLM's native
+#     MistralTokenizer, which dodges the transformers-v5 `is_fast` crash. No transformers
+#     pin needed — the stock image's bundled versions are fine.
+#  3) Vision encoder: FlashAttention has no SM120 build, so the Pixtral ViT is forced onto
+#     TORCH_SDPA via --mm-encoder-attn-backend (entrypoint). << the one UNPROVEN bit:
+#     smoke-test a real image right after launch, see README.
 #
-# The grep makes the BUILD fail loudly if the upstream line ever moves.
+# No CUDA forward-compat shim (unlike main): SM120 needs a real >=580 host driver; the
+# compat libs can't back-fill Blackwell support, so we keep them off the library path.
 
-FROM vllm/vllm-openai:v0.22.1
+FROM vllm/vllm-openai:v0.24.0
 
-# Pin the transformers / mistral_common pair (matches our reference deployment).
-RUN pip install -q --no-cache-dir transformers==5.12.1 mistral_common==1.11.3
+# Blackwell: FlashAttention-3 has no SM120 build → pin the LLM attention to the FA2 path.
+ENV VLLM_FLASH_ATTN_VERSION=2 \
+    PYTHONUNBUFFERED=1
 
-# Guard the fetch_images call.
-RUN F=/usr/local/lib/python3.12/dist-packages/transformers/processing_utils.py && \
-    sed -i 's/self\.image_processor\.fetch_images(images)/getattr(self.image_processor, "fetch_images", lambda x: x)(images)/' "$F" && \
-    grep -q 'getattr(self.image_processor, "fetch_images", lambda x: x)(images)' "$F"
+# Entrypoint builds `vllm serve` from the ENV tunables below. Logic layer — changes rarely,
+# so editing a config default (next layer) never invalidates it, and neither busts the base.
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# CUDA forward compatibility. This image ships CUDA 12.9 userspace, but some GPU
-# hosts run an older kernel-mode driver (e.g. 12.4 -> "driver too old"). On data-
-# center GPUs (H100/H200/A100/B200) the bundled forward-compat driver lets the newer
-# CUDA run on the older kernel driver — just put it first on the library path.
-ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:${LD_LIBRARY_PATH}
+# ── Tunable defaults ── LAST layer on purpose: changing config rebuilds only this cheap
+# ENV layer. Better still, override at runtime with `-e VAR=...` (host template env) — then
+# there's no rebuild at all. Structural recipe flags live in entrypoint.sh, not here.
+ENV MODEL=mistralai/Devstral-Small-2-24B-Instruct-2512 \
+    REVISION=f2ca762c466d28ab948b7205492ceb3914e73f8a \
+    MAX_MODEL_LEN=131072 \
+    GPU_MEM_UTIL=0.90 \
+    MAX_NUM_BATCHED=16384 \
+    IMAGE_LIMIT=4 \
+    KV_CACHE_DTYPE=fp8 \
+    MM_ENCODER_BACKEND=TORCH_SDPA \
+    SPEC= \
+    EXTRA_ARGS=
 
-# Default serving args. The base ENTRYPOINT is ["vllm","serve"], so these append to
-# it -> `vllm serve <args>`. Run the image with no args and it just serves; override
-# by passing your own args after the image name. VLLM_API_KEY comes from the env.
-CMD ["--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--model", "mistralai/Devstral-Small-2-24B-Instruct-2512", \
-     "--revision", "f2ca762c466d28ab948b7205492ceb3914e73f8a", \
-     "--max-model-len", "131072", \
-     "--kv-cache-dtype", "fp8", \
-     "--enable-prefix-caching", \
-     "--enable-prompt-tokens-details", \
-     "--gpu-memory-utilization", "0.90", \
-     "--max-num-batched-tokens", "8192", \
-     "--enable-auto-tool-choice", "--tool-call-parser", "mistral", \
-     "--spec-method", "ngram", "--spec-tokens", "8"]
+EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]
