@@ -41,7 +41,7 @@ ENV MODEL=mistralai/Devstral-Small-2-24B-Instruct-2512 \
     IMAGE_LIMIT=4 \
     KV_CACHE_DTYPE=fp8 \
     MM_ENCODER_BACKEND=TORCH_SDPA \
-    SPEC= \
+    SPEC_CONFIG= \
     EXTRA_ARGS=
 
 EXPOSE 8000

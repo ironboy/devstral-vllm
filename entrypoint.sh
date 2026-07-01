@@ -40,9 +40,11 @@ args=(
 # Pin an immutable model commit so every cold start pulls identical weights/tokenizer.
 [ -n "${REVISION:-}" ] && args+=(--revision "$REVISION")
 
-# Optional speculative decoding, e.g. SPEC="--spec-method ngram --spec-tokens 8".
-# Left empty by default (inverts under high concurrency). Word-split intentionally.
-[ -n "${SPEC:-}" ] && args+=($SPEC)
+# Speculative decoding — vLLM 0.24.0 takes ONE --speculative-config JSON arg (the old
+# --spec-method/--spec-tokens flags are GONE). Empty by default: ngram INVERTS under high
+# concurrency → use only for low-concurrency/dev. Passed quoted, so spaces in the JSON are fine.
+SPEC_CONFIG='{"method":"ngram","num_speculative_tokens":10,"prompt_lookup_max":4,"prompt_lookup_min":2}'
+[ -n "${SPEC_CONFIG:-}" ] && args+=(--speculative-config "$SPEC_CONFIG")
 
 # Escape hatch for anything else without a rebuild. Word-split intentionally.
 [ -n "${EXTRA_ARGS:-}" ] && args+=($EXTRA_ARGS)
