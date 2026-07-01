@@ -11,9 +11,28 @@
 #   - TUNABLE (ENV): perf/capacity dials you sweep per host.
 set -euo pipefail
 
+# --- Reverse proxy -----------------------------------------------------------
+# Caddy äger den publika porten (PORT, default 8000 — den Vast mappar). vLLM
+# binder bara till 127.0.0.1:VLLM_PORT och nås aldrig direkt utifrån. Proxyn är
+# default-deny: bara /v1/* (vLLM:s egen nyckel) + token:at /metrics,/health.
+PUBLIC_PORT="${PORT:-8000}"
+VLLM_HOST="127.0.0.1"
+VLLM_PORT="${VLLM_PORT:-8001}"
+
+# Metrics/health-token: separat METRICS_TOKEN, annars återanvänd VLLM_API_KEY så
+# klienten bara behöver en nyckel. Tomt → /metrics och /health nekas (403).
+METRICS_TOKEN="${METRICS_TOKEN:-${VLLM_API_KEY:-}}"
+export CADDY_PORT="$PUBLIC_PORT" METRICS_TOKEN
+if [ -z "$METRICS_TOKEN" ]; then
+  echo "WARN: varken METRICS_TOKEN eller VLLM_API_KEY satt → /metrics och /health returnerar 403 (låst)."
+fi
+
+echo "+ caddy: publik :${PUBLIC_PORT} → vLLM 127.0.0.1:${VLLM_PORT} (default-deny; /v1/* öppet, /metrics,/health token:at)"
+caddy run --config /etc/caddy/Caddyfile --adapter caddyfile &
+
 args=(
-  --host "${HOST:-0.0.0.0}"
-  --port "${PORT:-8000}"
+  --host "$VLLM_HOST"
+  --port "$VLLM_PORT"
   --model "${MODEL:?MODEL env required}"
 
   # --- STRUCTURAL: the Blackwell + Devstral recipe ---

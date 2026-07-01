@@ -25,6 +25,12 @@ FROM vllm/vllm-openai:v0.24.0
 ENV VLLM_FLASH_ATTN_VERSION=2 \
     PYTHONUNBUFFERED=1
 
+# Reverse proxy (static binary, ~40 MB): fronts vLLM so only /v1/* + token'd
+# /metrics,/health are reachable; everything else (server_info, tokenize, docs…) is
+# default-denied. vLLM itself binds 127.0.0.1 only (entrypoint) — never exposed direct.
+COPY --from=caddy:2 /usr/bin/caddy /usr/bin/caddy
+COPY Caddyfile /etc/caddy/Caddyfile
+
 # Entrypoint builds `vllm serve` from the ENV tunables below. Logic layer — changes rarely,
 # so editing a config default (next layer) never invalidates it, and neither busts the base.
 COPY entrypoint.sh /entrypoint.sh
@@ -42,7 +48,9 @@ ENV MODEL=mistralai/Devstral-Small-2-24B-Instruct-2512 \
     KV_CACHE_DTYPE=fp8 \
     MM_ENCODER_BACKEND=TORCH_SDPA \
     SPEC_CONFIG= \
-    EXTRA_ARGS=
+    EXTRA_ARGS= \
+    METRICS_TOKEN=
 
+# Caddy owns the public port (8000, what Vast maps); vLLM lives on 127.0.0.1:8001.
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]

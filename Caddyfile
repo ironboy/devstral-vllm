@@ -1,0 +1,33 @@
+# Reverse proxy framför vLLM. Default-deny: bara det som faktiskt behövs nås.
+#
+#   /v1/*            → vLLM (vLLM:s egen --api-key/VLLM_API_KEY är auth:en)
+#   /metrics /health → kräver "Authorization: Bearer $METRICS_TOKEN", annars 403
+#   allt annat       → 403 (stänger /server_info, /tokenize, /docs, /version, ...)
+#
+# vLLM binder till 127.0.0.1:8001 (aldrig exponerat direkt); Caddy äger den
+# publika porten (den Vast mappar). Portar via env: CADDY_PORT (default 8000).
+
+{
+	admin off
+	auto_https off
+}
+
+:{$CADDY_PORT:8000} {
+	# OpenAI-API:t — vLLM sköter sin egen nyckel.
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8001
+	}
+
+	# Observability — token-skyddat (metrics + readiness).
+	@obs path /metrics /health
+	handle @obs {
+		@unauth not header Authorization "Bearer {$METRICS_TOKEN}"
+		respond @unauth 403
+		reverse_proxy 127.0.0.1:8001
+	}
+
+	# Allt annat: nekas.
+	handle {
+		respond "forbidden" 403
+	}
+}

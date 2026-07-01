@@ -41,7 +41,9 @@ docker run --gpus all -p 8000:8000 \
 ## Tunable env vars
 | Var | Default | Notes |
 |---|---|---|
-| `VLLM_API_KEY` | — | Bearer token the server requires; clients must match. |
+| `VLLM_API_KEY` | — | Bearer token the server requires for `/v1/*`; clients must match. |
+| `METRICS_TOKEN` | = `VLLM_API_KEY` | Bearer token for `/metrics` + `/health` (see [Exposed routes](#exposed-routes)). Defaults to `VLLM_API_KEY`; set separately to split. |
+| `PORT` | `8000` | **Public** port Caddy listens on (what Vast maps). vLLM runs internally on `127.0.0.1:8001`. |
 | `MODEL` | `mistralai/Devstral-Small-2-24B-Instruct-2512` | |
 | `REVISION` | pinned commit | Immutable → every cold start pulls identical weights. |
 | `MAX_MODEL_LEN` | `131072` | Size as `text + Σ image_tokens`. A full image ≈ ~3,000 tokens. |
@@ -68,10 +70,27 @@ If `0.24.0` stable misbehaves on this card, swap the base to the **cu130 nightly
 If anything knocks serving off mistral mode (e.g. an HF-format mirror), the `is_fast` crash
 returns — pin `transformers<5` as the backstop.
 
+## Exposed routes
+vLLM's `--api-key` only guards `/v1/*` — `/metrics`, `/health`, `/server_info`, `/tokenize`,
+`/docs`, … are otherwise **wide open** (and `/server_info` leaks the full launch config). So a
+tiny [Caddy](./Caddyfile) reverse proxy fronts vLLM with a **default-deny** policy:
+
+| Route | Reachable | Auth |
+|---|---|---|
+| `/v1/*` | yes | `VLLM_API_KEY` (vLLM's own) |
+| `/metrics`, `/health` | yes | `METRICS_TOKEN` (Bearer; defaults to `VLLM_API_KEY`) |
+| everything else | **403** | — |
+
+vLLM binds `127.0.0.1:8001` only; Caddy owns the public `PORT` (8000). **One port** — metrics
+and serving share it, split by path — so Vast's single 8000 mapping is all you need. Scrape with:
+```bash
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://<host>:8000/metrics
+```
+
 ## Serving-platform notes
 - The API server comes up **only after** weights load — set the platform's health-check
   **grace period** high (first download ~10–15 min) or it gets killed mid-download.
-- Health at `/health` (200 once loaded); OpenAI API at `/v1/chat/completions`.
+- Health at `/health` (200 once loaded, **token required**); OpenAI API at `/v1/chat/completions`.
 - No persistent volume required; with `REVISION` pinned, each cold start pulls the same weights.
 
 ## Sources
